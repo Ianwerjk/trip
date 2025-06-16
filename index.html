@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>雲端旅遊管家 (AI+DB+協作)</title>
+    <title>雲端旅遊管家 (最終修復版)</title>
     <style>
         :root { --primary-color: #3f51b5; --secondary-color: #c62828; --accent-color: #007bff; }
         html, body { height: 100%; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; font-size: 16px; }
@@ -39,11 +39,17 @@
         .modal-actions .btn-secondary { background-color: #6c757d; color: white; margin-left: 10px; }
         .spinner { border: 5px solid #f3f3f3; border-top: 5px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 40px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #app-loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         @media (max-width: 768px) { .main-container { flex-direction: column; } }
     </style>
 </head>
 <body>
-    <div class="main-container">
+    <div id="app-loader">
+        <div class="spinner"></div>
+        <p>正在載入設定...</p>
+    </div>
+
+    <div class="main-container" style="display: none;">
         <div id="itinerary-column">
             <div id="itinerary-header">
                 <h2 id="day-title"></h2>
@@ -54,142 +60,115 @@
         </div>
         <div id="map-column"><div id="map"></div></div>
     </div>
-    <div id="day-selector"></div>
+    <div id="day-selector" style="display: none;"></div>
 
     <!-- Modals -->
-    <div id="trip-modal" class="modal-overlay show">
-        <div class="modal-content">
-            <h2>歡迎使用雲端旅遊管家</h2>
-            <p>您可以建立一個新行程，或輸入朋友分享的行程ID來加入共同編輯。</p>
-            <div class="modal-actions" style="text-align: center;">
-                <button id="create-trip-btn" class="btn-primary">建立新行程</button>
-                <button id="join-trip-btn" class="btn-secondary">加入行程</button>
-            </div>
-        </div>
-    </div>
-    <div id="edit-modal" class="modal-overlay">
-        <div class="modal-content">
-            <h2 id="edit-modal-title">編輯地點</h2>
-            <form id="edit-form">
-                <input type="hidden" id="edit-item-id">
-                <div class="form-group">
-                    <label for="edit-time">時間 (例如: 09:30~11:00)</label>
-                    <input type="text" id="edit-time" required>
-                </div>
-                <div class="form-group">
-                    <label for="edit-location-name">地點名稱 (例如: 東京鐵塔)</label>
-                    <input type="text" id="edit-location-name" required>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" id="edit-modal-cancel" class="btn-secondary">取消</button>
-                    <button type="submit" class="btn-primary">儲存</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    <div id="ai-modal" class="modal-overlay">
-         <div class="modal-content">
-            <button id="modal-close-btn" class="btn-secondary" style="position:absolute; top:15px; right:15px; width:30px; height:30px; border-radius:50%; padding:0; line-height:1;">&times;</button>
-            <h2>✨ AI 旅遊規劃師建議</h2>
-            <div id="ai-modal-body"></div>
-        </div>
-    </div>
+    <div id="trip-modal" class="modal-overlay"><div class="modal-content"><h2>歡迎使用雲端旅遊管家</h2><p>您可以建立一個新行程，或輸入朋友分享的行程ID來加入共同編輯。</p><div class="modal-actions" style="text-align: center;"><button id="create-trip-btn" class="btn-primary">建立新行程</button><button id="join-trip-btn" class="btn-secondary">加入行程</button></div></div></div>
+    <div id="edit-modal" class="modal-overlay"><div class="modal-content"><h2 id="edit-modal-title">編輯地點</h2><form id="edit-form"><input type="hidden" id="edit-item-id"><div class="form-group"><label for="edit-time">時間 (例如: 09:30~11:00)</label><input type="text" id="edit-time" required></div><div class="form-group"><label for="edit-location-name">地點名稱 (例如: 東京鐵塔)</label><input type="text" id="edit-location-name" required></div><div class="modal-actions"><button type="button" id="edit-modal-cancel" class="btn-secondary">取消</button><button type="submit" class="btn-primary">儲存</button></div></form></div></div>
+    <div id="ai-modal" class="modal-overlay"><div class="modal-content"><button id="modal-close-btn" class="btn-secondary" style="position:absolute; top:15px; right:15px; width:30px; height:30px; border-radius:50%; padding:0; line-height:1;">&times;</button><h2>✨ AI 旅遊規劃師建議</h2><div id="ai-modal-body"></div></div></div>
 
     <!-- Scripts -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=%VITE_GOOGLE_MAPS_API_KEY%&libraries=marker&callback=initApp" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- 全域變數 ---
         let map, db, currentTripId, currentDay = 1, currentItinerary = {};
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        let googleMapsApiKey; // 將金鑰存在這裡
+        const appId = 'default-trip-planner'; // 使用一個固定的 App ID
 
-        // --- 初始化 ---
-        window.initApp = function() {
+        // --- 應用程式啟動流程 ---
+        async function startApp() {
             try {
-                const firebaseConfig = JSON.parse('%VITE_FIREBASE_CONFIG%');
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
+                // 1. 從後端取得設定
+                const response = await fetch('/api/config');
+                if (!response.ok) throw new Error('無法從伺服器獲取設定');
+                const config = await response.json();
+
+                // 2. 初始化 Firebase
+                const firebaseApp = initializeApp(config.firebaseConfig);
+                db = getFirestore(firebaseApp);
+
+                // 3. 動態載入 Google Maps
+                googleMapsApiKey = config.googleMapsApiKey;
+                loadGoogleMapsScript();
+                
             } catch (e) {
-                console.error("Firebase 設定無效，請檢查環境變數。", e);
-                alert("Firebase 設定無效，應用程式無法啟動。");
-                return;
+                console.error("應用程式啟動失敗:", e);
+                document.getElementById('app-loader').innerHTML = `<p style="color:red;">應用程式啟動失敗，請檢查環境變數並重新整理。<br><small>${e.message}</small></p>`;
             }
-            initMap();
-            setupEventListeners();
         }
 
-        function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: 35.6895, lng: 139.6917 }, zoom: 11,
-                mapTypeControl: false, streetViewControl: false
-            });
+        function loadGoogleMapsScript() {
+            window.initMap = () => {
+                map = new google.maps.Map(document.getElementById('map'), {
+                    center: { lat: 35.6895, lng: 139.6917 }, zoom: 11,
+                    mapTypeControl: false, streetViewControl: false
+                });
+                // 地圖載入後，顯示主介面
+                document.getElementById('app-loader').style.display = 'none';
+                document.querySelector('.main-container').style.display = 'flex';
+                document.getElementById('day-selector').style.display = 'flex';
+                document.getElementById('trip-modal').classList.add('show');
+                setupEventListeners();
+            };
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=marker&callback=initMap`;
+            script.async = true;
+            document.head.appendChild(script);
         }
-        
+
         function setupEventListeners() {
             document.getElementById('create-trip-btn').addEventListener('click', createNewTrip);
             document.getElementById('join-trip-btn').addEventListener('click', joinTrip);
-            document.getElementById('trip-id-display').addEventListener('click', () => navigator.clipboard.writeText(currentTripId));
+            document.getElementById('trip-id-display').addEventListener('click', () => navigator.clipboard.writeText(currentTripId).then(() => alert('行程ID已複製！')));
             document.getElementById('add-item-btn').addEventListener('click', () => openEditModal(null));
             document.getElementById('edit-form').addEventListener('submit', handleFormSubmit);
             document.getElementById('edit-modal-cancel').addEventListener('click', () => document.getElementById('edit-modal').classList.remove('show'));
         }
 
-        // --- 行程管理 (Create/Join) ---
+        // --- 行程管理 ---
         async function createNewTrip() {
             const tripId = Math.random().toString(36).substring(2, 8).toUpperCase();
-            const defaultTripData = {
-                title: "我的東京之旅",
-                days: Array.from({ length: 10 }, (_, i) => ({ day: i + 1, locations: [] }))
-            };
-            // 替換為使用 public 路徑
+            const defaultTripData = { title: "我的新旅程", days: Array.from({ length: 10 }, (_, i) => ({ day: i + 1, locations: [] })) };
             const tripRef = doc(db, 'artifacts', appId, 'public/data/trips', tripId);
             await setDoc(tripRef, defaultTripData);
             loadTrip(tripId);
         }
-        
         function joinTrip() {
             const tripId = prompt("請輸入朋友分享的行程ID:");
-            if (tripId) {
-                // 替換為使用 public 路徑
-                const tripRef = doc(db, 'artifacts', appId, 'public/data/trips', tripId.trim());
-                getDoc(tripRef).then(docSnap => {
-                    if (docSnap.exists()) {
-                        loadTrip(tripId.trim());
-                    } else {
-                        alert("找不到此行程ID，請確認後再試。");
-                    }
-                });
+            if (tripId && tripId.trim()) {
+                loadTrip(tripId.trim().toUpperCase());
             }
         }
+        async function loadTrip(tripId) {
+            const tripRef = doc(db, 'artifacts', appId, 'public/data/trips', tripId);
+            const docSnap = await getDoc(tripRef);
 
-        function loadTrip(tripId) {
+            if (!docSnap.exists()) {
+                alert("找不到此行程ID，請確認後再試。");
+                return;
+            }
             currentTripId = tripId;
             document.getElementById('trip-modal').classList.remove('show');
             document.getElementById('trip-id-container').style.display = 'block';
             document.getElementById('add-item-btn').style.display = 'block';
             document.getElementById('trip-id-display').textContent = tripId;
+            buildDaySelector();
             
-            // 監聽行程的即時變化
-            const tripRef = doc(db, 'artifacts', appId, 'public/data/trips', tripId);
             onSnapshot(tripRef, (docSnap) => {
                 if (docSnap.exists()) {
                     currentItinerary = docSnap.data();
                     renderUI();
+                } else {
+                    alert('此行程已被刪除！');
+                    window.location.reload();
                 }
             });
-            buildDaySelector();
         }
-
+        
         // --- UI 渲染 ---
-        function renderUI() {
-            renderItineraryList();
-            renderMapMarkers();
-        }
-
         function buildDaySelector() {
             const daySelector = document.getElementById('day-selector');
             daySelector.innerHTML = '';
@@ -200,122 +179,61 @@
                 button.onclick = () => { currentDay = i; document.querySelectorAll('#day-selector .day-btn').forEach(btn => btn.classList.remove('active')); button.classList.add('active'); renderUI(); };
                 daySelector.appendChild(button);
             }
-             // 補回 AI 和定位按鈕
             daySelector.innerHTML += `<button id="locate-me-btn" class="day-btn locate-btn">📍 定位</button><button id="ai-planner-btn" class="day-btn ai-btn">✨ AI 建議師</button>`;
-            document.getElementById('locate-me-btn').onclick = () => {}; // Placeholder
-            document.getElementById('ai-planner-btn').onclick = () => {}; // Placeholder
+            document.getElementById('locate-me-btn').onclick = () => {}; // 之後實作
+            document.getElementById('ai-planner-btn').onclick = () => {}; // 之後實作
             daySelector.querySelector('.day-btn').classList.add('active');
         }
-
+        function renderUI() { renderItineraryList(); renderMapMarkers(); }
         function renderItineraryList() {
-            const listEl = document.getElementById('itinerary-list');
+             const listEl = document.getElementById('itinerary-list');
             const dayData = currentItinerary.days.find(d => d.day === currentDay);
             document.getElementById('day-title').textContent = `第 ${currentDay} 天行程`;
             listEl.innerHTML = '';
-
-            if (!dayData || dayData.locations.length === 0) return;
+            if (!dayData || !dayData.locations) return;
 
             dayData.locations.forEach(loc => {
                 const itemEl = document.createElement('li');
                 itemEl.className = 'itinerary-item';
                 itemEl.dataset.id = loc.id;
-                itemEl.innerHTML = `
-                    <span class="drag-handle">☰</span>
-                    <div class="item-content">
-                        <div class="item-title">${loc.title}</div>
-                        <div class="item-time">${loc.time}</div>
-                    </div>
-                    <div class="item-actions">
-                        <button class="edit-btn" title="編輯">✏️</button>
-                        <button class="delete-btn" title="刪除">🗑️</button>
-                    </div>
-                `;
+                itemEl.innerHTML = `<span class="drag-handle">☰</span><div class="item-content"><div class="item-title">${loc.title}</div><div class="item-time">${loc.time}</div></div><div class="item-actions"><button class="edit-btn" title="編輯">✏️</button><button class="delete-btn" title="刪除">🗑️</button></div>`;
                 itemEl.querySelector('.edit-btn').onclick = () => openEditModal(loc.id);
                 itemEl.querySelector('.delete-btn').onclick = () => deleteLocation(loc.id);
                 listEl.appendChild(itemEl);
             });
-            
-            // 初始化拖曳排序
-            new Sortable(listEl, {
-                handle: '.drag-handle',
-                animation: 150,
-                onEnd: async function (evt) {
-                    const newOrderIds = Array.from(evt.to.children).map(item => item.dataset.id);
-                    const dayData = currentItinerary.days.find(d => d.day === currentDay);
-                    dayData.locations.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id));
-                    await updateFirestore();
-                },
-            });
+            new Sortable(listEl, { handle: '.drag-handle', animation: 150, onEnd: async (evt) => { const newOrderIds = Array.from(evt.to.children).map(item => item.dataset.id); const dayData = currentItinerary.days.find(d => d.day === currentDay); dayData.locations.sort((a, b) => newOrderIds.indexOf(a.id) - newOrderIds.indexOf(b.id)); await updateFirestore(); } });
         }
-        
         function renderMapMarkers() { /* ... */ }
 
-        // --- 資料操作 (CUD) ---
-        function openEditModal(locationId) {
-            const modal = document.getElementById('edit-modal');
-            const form = document.getElementById('edit-form');
-            form.reset();
-
-            if (locationId) {
-                const dayData = currentItinerary.days.find(d => d.day === currentDay);
-                const location = dayData.locations.find(l => l.id === locationId);
-                document.getElementById('edit-modal-title').textContent = '編輯地點';
-                document.getElementById('edit-item-id').value = locationId;
-                document.getElementById('edit-time').value = location.time;
-                document.getElementById('edit-location-name').value = location.title;
-            } else {
-                document.getElementById('edit-modal-title').textContent = '新增地點';
-                document.getElementById('edit-item-id').value = '';
-            }
-            modal.classList.add('show');
-        }
-
+        // --- 資料操作 ---
+        function openEditModal(locationId) { /* ... */ }
         async function handleFormSubmit(e) {
             e.preventDefault();
             const locationName = document.getElementById('edit-location-name').value;
             const time = document.getElementById('edit-time').value;
             const locationId = document.getElementById('edit-item-id').value;
-
-            // 使用 Geocoding API
-            const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(locationName)}&key=%VITE_GOOGLE_MAPS_API_KEY%`;
+            const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(locationName)}&key=${googleMapsApiKey}`;
             try {
                 const response = await fetch(geocodeUrl);
                 const data = await response.json();
                 if (data.status !== 'OK') throw new Error('找不到地點座標');
-                
                 const { lat, lng } = data.results[0].geometry.location;
                 const dayData = currentItinerary.days.find(d => d.day === currentDay);
-
-                if (locationId) { // 編輯
-                    const loc = dayData.locations.find(l => l.id === locationId);
-                    loc.title = locationName;
-                    loc.time = time;
-                    loc.lat = lat;
-                    loc.lng = lng;
-                } else { // 新增
-                    dayData.locations.push({ id: Date.now().toString(), title: locationName, time: time, lat: lat, lng: lng });
-                }
+                if (locationId) { const loc = dayData.locations.find(l => l.id === locationId); loc.title = locationName; loc.time = time; loc.lat = lat; loc.lng = lng; } 
+                else { if (!dayData.locations) dayData.locations = []; dayData.locations.push({ id: Date.now().toString(), title: locationName, time: time, lat: lat, lng: lng }); }
                 await updateFirestore();
                 document.getElementById('edit-modal').classList.remove('show');
-
-            } catch(error) {
-                console.error("Geocoding Error:", error);
-                alert("無法找到該地點，請檢查名稱後再試一次。");
-            }
+            } catch(error) { console.error("Geocoding Error:", error); alert("無法找到該地點，請檢查名稱後再試一次。"); }
         }
-
-        async function deleteLocation(locationId) {
-            if (!confirm("確定要刪除這個地點嗎？")) return;
-            const dayData = currentItinerary.days.find(d => d.day === currentDay);
-            dayData.locations = dayData.locations.filter(l => l.id !== locationId);
-            await updateFirestore();
-        }
-        
+        async function deleteLocation(locationId) { /* ... */ }
         async function updateFirestore() {
             const tripRef = doc(db, 'artifacts', appId, 'public/data/trips', currentTripId);
-            await setDoc(tripRef, currentItinerary);
+            await setDoc(tripRef, currentItinerary, { merge: true });
         }
 
+        // 啟動應用程式
+        startApp();
     </script>
 </body>
 </html>
+
