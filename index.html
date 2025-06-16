@@ -98,7 +98,6 @@
                 const target = e.target;
                 const targetId = target.id;
                 
-                // Modal and General Buttons
                 if (targetId === 'create-trip-btn') createNewTrip();
                 if (targetId === 'join-trip-btn') joinTrip();
                 if (target.closest('#import-trip-btn')) document.getElementById('import-modal').classList.add('show');
@@ -110,8 +109,7 @@
                 if (targetId === 'locate-me-btn') locateUser();
                 if (targetId === 'ai-planner-btn') getAiSuggestions();
                 if (targetId === 'trip-id-display') navigator.clipboard.writeText(currentTripId).then(() => alert('行程ID已複製！'));
-
-                // Day Selector
+                
                 const dayButton = target.closest('.day-btn');
                 if (dayButton?.dataset.day) {
                     currentDay = parseInt(dayButton.dataset.day);
@@ -119,8 +117,6 @@
                     dayButton.classList.add('active');
                     renderUI();
                 }
-
-                // Itinerary Item Actions
                 const itemElement = target.closest('.itinerary-item');
                 if (target.closest('.edit-btn')) openEditModal(itemElement.dataset.id);
                 if (target.closest('.delete-btn')) deleteLocation(itemElement.dataset.id);
@@ -160,10 +156,7 @@
                         alert('此行程已被刪除！'); window.location.reload();
                     }
                 });
-            } catch (error) {
-                console.error("Error loading trip:", error);
-                alert("載入行程時發生錯誤。");
-            }
+            } catch (error) { console.error("Error loading trip:", error); alert("載入行程時發生錯誤。"); }
         }
         
         function buildDaySelector() {
@@ -246,7 +239,7 @@
             try {
                 const response = await fetch(`/api/geocode?address=${encodeURIComponent(locationName)}`);
                 if (!response.ok) {
-                    const errData = await response.json().catch(() => ({ error: '伺服器回應錯誤' }));
+                    const errData = await response.json().catch(() => ({ error: '伺服器回應格式錯誤' }));
                     throw new Error(errData.error || `地理編碼失敗: ${response.statusText}`);
                 }
                 const data = await response.json();
@@ -305,4 +298,5 @@
     </script>
 </body>
 </html>
+
 
